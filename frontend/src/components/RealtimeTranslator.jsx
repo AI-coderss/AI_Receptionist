@@ -6,6 +6,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import AudioWave from "./AudioWave";
 import "../styles/RealtimeTranslator.css";
+import ThemeSwitch from "./ThemeSwitch";
 
 const SIGNAL_URL = "https://ai-receptionist-webrtc-server.onrender.com/api/rtc-connect";
 
@@ -27,22 +28,19 @@ const LANG_OPTS = [
   { code: "ja", label: "Japanese" },
   { code: "ko", label: "Korean" },
   { code: "pt", label: "Portuguese" },
-    { code: "tr", label: "Turkish" },
-    { code: "pl", label: "Polish" },
-    { code: "nl", label: "Dutch" },
-    { code: "sv", label: "Swedish" },
-    { code: "fi", label: "Finnish" },
-    { code: "da", label: "Danish" },
-    { code: "no", label: "Norwegian" },
-    { code: "cs", label: "Czech" },
-    { code: "sk", label: "Slovak" },
-    { code: "hu", label: "Hungarian" },
-    { code: "ro", label: "Romanian" },  
-    { code: "bg", label: "Bulgarian" },
-    { code: "el", label: "Greek" },
-    
-
-
+  { code: "tr", label: "Turkish" },
+  { code: "pl", label: "Polish" },
+  { code: "nl", label: "Dutch" },
+  { code: "sv", label: "Swedish" },
+  { code: "fi", label: "Finnish" },
+  { code: "da", label: "Danish" },
+  { code: "no", label: "Norwegian" },
+  { code: "cs", label: "Czech" },
+  { code: "sk", label: "Slovak" },
+  { code: "hu", label: "Hungarian" },
+  { code: "ro", label: "Romanian" },  
+  { code: "bg", label: "Bulgarian" },
+  { code: "el", label: "Greek" },
 ];
 const labelOf = (c) => LANG_OPTS.find((x) => x.code === c)?.label || c;
 
@@ -546,13 +544,13 @@ STRICT OUTPUT:
                 </span>
               </button>
 
-              <button
-                className="rt-button rt-toggle"
-                title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
-                onClick={toggleTheme}
-              >
-                {theme === "light" ? "☾ Dark" : "☀︎ Light"}
-              </button>
+              {/* Reusable Theme Switch (controlled) */}
+              <ThemeSwitch
+                checked={theme === "dark"}
+                onChange={toggleTheme}
+                size="md"
+                ariaLabel="Toggle theme"
+              />
             </div>
 
             {/* Hamburger (visible on mobile) */}
@@ -627,15 +625,11 @@ STRICT OUTPUT:
               </span>
             </button>
 
-            <button
-              className="rt-button rt-toggle mobile-large"
-              onClick={() => {
-                toggleTheme();
-                setMenuOpen(false);
-              }}
-            >
-              {theme === "light" ? "☾ Dark" : "☀︎ Light"}
-            </button>
+            <ThemeSwitch
+              checked={theme === "dark"}
+              onChange={toggleTheme}
+              ariaLabel="Toggle theme"
+            />
           </div>
         </div>
         {menuOpen && (
