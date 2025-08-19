@@ -1,0 +1,12 @@
+# LangChain and LLMs
+langchain
+langchain-community
+langchain-core
+langchain-qdrant
+langchain-openai
+openai
+tiktoken
+# Web Server
+flask
+flask-cors
+gunicorn

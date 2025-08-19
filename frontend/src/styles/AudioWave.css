@@ -1,0 +1,51 @@
+/* =========================================================
+   AudioWave — Bar Graph (CodeBin extraction)
+   Compact spacing + shared width with the card
+   ========================================================= */
+
+:root {
+  /* Visualizer size (smaller & tighter) */
+  --vz-height: clamp(100px, 12vh, 160px);
+  --vz-gap-top: clamp(14px, 2.4vh, 28px);
+  --vz-gap-bottom: clamp(22px, 3.6vh, 40px);
+
+  /* Match app tokens */
+  --container-max: var(--container-max, 1120px);
+  --vz-radius: var(--r-xl, 18px);
+  --vz-edge: rgba(0, 0, 0, 0.6);
+}
+
+.aw-wrap {
+  width: 100%;
+  height: var(--vz-height);
+  border-radius: var(--vz-radius);
+  border: 1px solid var(--vz-edge);
+  overflow: hidden;
+  position: relative;
+}
+
+#aw-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #000; /* black background requested */
+}
+
+/* Fallback if rendered directly */
+.voice-stage-wave > canvas#aw-canvas {
+  width: 100%;
+  height: var(--vz-height);
+  border-radius: var(--vz-radius);
+  border: 1px solid var(--vz-edge);
+  background: #000;
+}
+
+/* Slightly more room on very small screens */
+@media (max-width: 720px) {
+  :root {
+    --vz-height: clamp(110px, 16vh, 170px);
+    --vz-gap-top: clamp(16px, 3vh, 32px);
+    --vz-gap-bottom: clamp(28px, 4.5vh, 56px);
+  }
+}
+
