@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 app = Flask(__name__)
 
-FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "https://ai-receptionist-assistant-dsah.onrender.com")
 CORS(app, resources={
     r"/api/*": {
         "origins": [FRONTEND_ORIGIN],
@@ -192,8 +192,8 @@ def rtc_connect():
         return Response(f"Error: {e}", status=500)
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8813"))
-    app.run(host="0.0.0.0", port=port, debug=True)
+
+    app.run(host="0.0.0.0", port=8813, debug=True)
 
 
 

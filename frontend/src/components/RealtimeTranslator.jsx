@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from "react";
 import AudioWave from "./AudioWave";
 import "../styles/RealtimeTranslator.css";
 
-const SIGNAL_URL = "http://127.0.0.1:8813/api/rtc-connect";
+const SIGNAL_URL = "https://ai-receptionist-webrtc-server.onrender.com/api/rtc-connect";
 
 // Public-folder logo path (place your file in /public)
 // Example names: /hospital-logo.svg, /hospital-logo.png, etc.
