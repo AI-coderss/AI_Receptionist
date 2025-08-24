@@ -1,16 +1,12 @@
 /* eslint-disable no-unused-vars */
 // src/components/RealtimeTranslator.jsx
-// Clean, responsive UI with:
-// - Cards above the (smaller-footprint) orb
-// - Bright-green FAB pulse when active & smaller mic icon
-// - Dark theme cyan particles + light theme transparent canvas
-// - Mobile-only drawer for options; desktop inline pickers
-// - Transcripts render WITHOUT [[TO_*]] tags
+// Mobile: ORB on top, cards below (via CSS order)
+// Scrollable cards; bright-green FAB with pulse; light theme = transparent orb canvas.
 
 import React, { useEffect, useRef, useState } from "react";
 import "../styles/RealtimeTranslator.css";
 
-import ThemeSwitch from "./ThemeSwitch"; // your themed switch (imports ../styles/ThemeSwitch.css)
+import ThemeSwitch from "./ThemeSwitch"; // your component (../styles/ThemeSwitch.css)
 import BaseOrb from "./BaseOrb";
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore";
 import { startVolumeMonitoring } from "./audioLevelAnalyzer";
@@ -48,11 +44,9 @@ const LANG_OPTS = [
 ];
 const labelOf = (c) => LANG_OPTS.find((x) => x.code === c)?.label || c;
 
-// Strip tags like [[TO_PATIENT]], [[TO_RECEPTIONIST]], [[SUMMARY]]
 const TAG_TOKEN_RE = /\s*\[\[(?:TO_PATIENT|TO_RECEPTIONIST|SUMMARY)\]\]\s*/g;
 const stripRealtimeTags = (s) => (s || "").replace(TAG_TOKEN_RE, "").trim();
 
-// normalize to suppress near-duplicates
 const norm = (s) =>
   (s || "")
     .replace(/\s+/g, " ")
@@ -60,7 +54,6 @@ const norm = (s) =>
     .trim()
     .toLowerCase();
 
-// quick language guess for fallback routing
 function guessLangCode(s) {
   if (!s) return null;
   if (/[\u4E00-\u9FFF]/.test(s)) return "zh";
@@ -85,7 +78,6 @@ function Hamburger({ open, onToggle }) {
 }
 
 export default function RealtimeTranslator() {
-  // Theme (drives [data-theme])
   const [theme, setTheme] = useState(() => {
     if (typeof window === "undefined") return "light";
     return localStorage.getItem("rt2-theme") || "light";
@@ -96,44 +88,33 @@ export default function RealtimeTranslator() {
   }, [theme]);
   const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
 
-  // Mobile drawer
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Connection/UI state
   const [status, setStatus] = useState("disconnected"); // disconnected | connecting | connected | error
   const [patientLang, setPatientLang] = useState("ar");
   const [receptionistLang, setReceptionistLang] = useState("en");
   const [listening, setListening] = useState(false);
 
-  // WebRTC refs
   const pcRef = useRef(null);
   const dcRef = useRef(null);
   const localStreamRef = useRef(null);
   const remoteAudioRef = useRef(null);
 
-  // Streams
   const [remoteStream, setRemoteStream] = useState(null);
 
-  // Transcripts
-  const [leftTranscript, setLeftTranscript] = useState("");  // → Receptionist
+  const [leftTranscript, setLeftTranscript] = useState("");   // → Receptionist
   const [rightTranscript, setRightTranscript] = useState(""); // → Patient
   const [liveUserLine, setLiveUserLine] = useState("");
   const [liveAssistLine, setLiveAssistLine] = useState("");
 
-  // duplicate suppression
   const recentMapRef = useRef(new Map());
   const RECENT_WINDOW_MS = 7000;
 
-  // response buffers (to tie text tag to spoken transcript)
   const responseMapRef = useRef(new Map()); // id -> { textBuf, audioBuf, target }
 
-  // ORB store (assistant audio levels)
   const setAudioScale = useAudioForVisualizerStore((s) => s.setAudioScale);
-  const setVisualizerReady = useAudioForVisualizerStore(
-    (s) => s.setVisualizerReady
-  );
+  const setVisualizerReady = useAudioForVisualizerStore((s) => s.setVisualizerReady);
 
-  // attach remote stream to hidden audio + ORB monitor
   useEffect(() => {
     if (!remoteStream) return;
     if (remoteAudioRef.current) {
@@ -148,10 +129,8 @@ export default function RealtimeTranslator() {
         })
         .catch(() => {});
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remoteStream]);
+  }, [remoteStream, setAudioScale, setVisualizerReady]);
 
-  // Cleanup
   useEffect(() => {
     return () => {
       try {
@@ -188,8 +167,7 @@ export default function RealtimeTranslator() {
   }
 
   function buildInstructions(recLang, patLang) {
-    const recL = labelOf(recLang),
-      patL = labelOf(patLang);
+    const recL = labelOf(recLang), patL = labelOf(patLang);
     return `
 ROLE: Real-time two-party hospital interpreter.
 
@@ -250,7 +228,6 @@ NO ECHO:
       const dc = pc.createDataChannel("response", { ordered: true });
       dcRef.current = dc;
 
-      // live mic transcript chunks per item
       const liveByItem = new Map();
 
       dc.onopen = () => {
@@ -268,9 +245,7 @@ NO ECHO:
                 prefix_padding_ms: 300,
                 silence_duration_ms: 1000,
               },
-              input_audio_transcription: {
-                model: "gpt-4o-mini-transcribe",
-              },
+              input_audio_transcription: { model: "gpt-4o-mini-transcribe" },
             },
           })
         );
@@ -279,28 +254,20 @@ NO ECHO:
       const ensureResp = (id) => {
         const key = id || "default";
         const m = responseMapRef.current;
-        if (!m.has(key))
-          m.set(key, { textBuf: "", audioBuf: "", target: null });
+        if (!m.has(key)) m.set(key, { textBuf: "", audioBuf: "", target: null });
         return m.get(key);
       };
 
       dc.onmessage = (evt) => {
-        // prune duplicate window
         const now = Date.now();
         const dup = recentMapRef.current;
-        for (const [k, ts] of dup.entries()) {
-          if (now - ts > RECENT_WINDOW_MS) dup.delete(k);
-        }
+        for (const [k, ts] of dup.entries()) if (now - ts > RECENT_WINDOW_MS) dup.delete(k);
 
         try {
           const msg = JSON.parse(evt.data);
           const t = msg?.type;
 
-          // mic STT delta
-          if (
-            t === "conversation.item.input_audio_transcription.delta" &&
-            typeof msg.delta === "string"
-          ) {
+          if (t === "conversation.item.input_audio_transcription.delta" && typeof msg.delta === "string") {
             const id = msg.item_id || "live";
             const cur = (liveByItem.get(id) || "") + msg.delta;
             liveByItem.set(id, cur);
@@ -308,21 +275,13 @@ NO ECHO:
             return;
           }
 
-          // mic STT completed
-          if (
-            t === "conversation.item.input_audio_transcription.completed" &&
-            typeof msg.transcript === "string"
-          ) {
+          if (t === "conversation.item.input_audio_transcription.completed" && typeof msg.transcript === "string") {
             liveByItem.delete(msg.item_id || "live");
             setLiveUserLine("");
             return;
           }
 
-          // assistant text tag (stream)
-          if (
-            (t === "response.text.delta" || t === "response.output_text.delta") &&
-            typeof msg.delta === "string"
-          ) {
+          if ((t === "response.text.delta" || t === "response.output_text.delta") && typeof msg.delta === "string") {
             const r = ensureResp(msg.response_id);
             r.textBuf += msg.delta;
 
@@ -337,35 +296,23 @@ NO ECHO:
 
               if (line.startsWith("[[TO_PATIENT]]")) {
                 r.target = "PATIENT";
-                const content = stripRealtimeTags(
-                  line.slice("[[TO_PATIENT]]".length)
-                );
-                if (content)
-                  setRightTranscript((prev) =>
-                    prev ? `${prev}\n${content}` : content
-                  );
+                const content = stripRealtimeTags(line.slice("[[TO_PATIENT]]".length));
+                if (content) setRightTranscript((prev) => (prev ? `${prev}\n${content}` : content));
                 setLiveAssistLine("");
                 continue;
               }
               if (line.startsWith("[[TO_RECEPTIONIST]]")) {
                 r.target = "RECEPTIONIST";
-                const content = stripRealtimeTags(
-                  line.slice("[[TO_RECEPTIONIST]]".length)
-                );
-                if (content)
-                  setLeftTranscript((prev) =>
-                    prev ? `${prev}\n${content}` : content
-                  );
+                const content = stripRealtimeTags(line.slice("[[TO_RECEPTIONIST]]".length));
+                if (content) setLeftTranscript((prev) => (prev ? `${prev}\n${content}` : content));
                 setLiveAssistLine("");
                 continue;
               }
             }
-
             setLiveAssistLine(stripRealtimeTags(r.textBuf).trim());
             return;
           }
 
-          // assistant spoken transcript (what the voice says)
           if (t === "response.audio_transcript.delta" && typeof msg.delta === "string") {
             const r = ensureResp(msg.response_id);
             r.audioBuf += msg.delta;
@@ -377,27 +324,17 @@ NO ECHO:
             const r = ensureResp(msg.response_id);
             const spoken = stripRealtimeTags(r.audioBuf || "").trim();
             setLiveAssistLine("");
-
             if (spoken) {
               if (r.target === "PATIENT") {
-                setRightTranscript((prev) =>
-                  prev ? `${prev}\n${spoken}` : spoken
-                );
+                setRightTranscript((prev) => (prev ? `${prev}\n${spoken}` : spoken));
               } else if (r.target === "RECEPTIONIST") {
-                setLeftTranscript((prev) =>
-                  prev ? `${prev}\n${spoken}` : spoken
-                );
+                setLeftTranscript((prev) => (prev ? `${prev}\n${spoken}` : spoken));
               } else {
-                // fallback routing
                 const g = guessLangCode(spoken);
                 if (g === patientLang) {
-                  setRightTranscript((prev) =>
-                    prev ? `${prev}\n${spoken}` : spoken
-                  );
+                  setRightTranscript((prev) => (prev ? `${prev}\n${spoken}` : spoken));
                 } else {
-                  setLeftTranscript((prev) =>
-                    prev ? `${prev}\n${spoken}` : spoken
-                  );
+                  setLeftTranscript((prev) => (prev ? `${prev}\n${spoken}` : spoken));
                 }
               }
             }
@@ -409,9 +346,7 @@ NO ECHO:
             setLiveAssistLine("");
             return;
           }
-        } catch {
-          // ignore non-JSON frames
-        }
+        } catch {}
       };
 
       dc.onclose = () => {
@@ -427,17 +362,11 @@ NO ECHO:
         responseMapRef.current.clear();
       };
 
-      const offer = await pc.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: false,
-      });
+      const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: false });
       await pc.setLocalDescription(offer);
       const sdp = pc.localDescription?.sdp || offer.sdp;
 
-      const qs = new URLSearchParams({
-        recLang: receptionistLang,
-        patLang: patientLang,
-      }).toString();
+      const qs = new URLSearchParams({ recLang: receptionistLang, patLang: patientLang }).toString();
       const res = await fetch(`${SIGNAL_URL}?${qs}`, {
         method: "POST",
         headers: { "Content-Type": "application/sdp" },
@@ -454,7 +383,6 @@ NO ECHO:
     }
   }
 
-  // Mic toggle
   async function toggleMic() {
     if (status !== "connected") {
       await startSession();
@@ -471,7 +399,6 @@ NO ECHO:
     });
   }
 
-  // Sync instructions when languages change mid-call
   useEffect(() => {
     if (status === "connected" && dcRef.current?.readyState === "open") {
       const instructions = buildInstructions(receptionistLang, patientLang);
@@ -486,17 +413,13 @@ NO ECHO:
               prefix_padding_ms: 300,
               silence_duration_ms: 1000,
             },
-            input_audio_transcription: {
-              model: "gpt-4o-mini-transcribe",
-            },
+            input_audio_transcription: { model: "gpt-4o-mini-transcribe" },
           },
         })
       );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [patientLang, receptionistLang]);
+  }, [patientLang, receptionistLang, status]);
 
-  // Live strings for cards, tags stripped
   const safeAssistLive = stripRealtimeTags(liveAssistLine);
   const safeUserLive = stripRealtimeTags(liveUserLine);
 
@@ -517,10 +440,8 @@ NO ECHO:
 
   return (
     <div className="rt2-app">
-      {/* hidden audio element for assistant voice */}
       <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className="rt2-header">
         <div className="brand">
           <span className="logo" />
@@ -530,7 +451,7 @@ NO ECHO:
           </div>
         </div>
 
-        {/* Desktop language pickers ONLY (mobile uses drawer) */}
+        {/* Desktop pickers; on mobile they’re in the drawer */}
         <div className="langbar" role="group" aria-label="Languages">
           <label className="lang">
             <span className="lang-role">Receptionist</span>
@@ -542,9 +463,7 @@ NO ECHO:
                 onChange={(e) => setReceptionistLang(e.target.value)}
               >
                 {LANG_OPTS.map((o) => (
-                  <option key={o.code} value={o.code}>
-                    {o.label}
-                  </option>
+                  <option key={o.code} value={o.code}>{o.label}</option>
                 ))}
               </select>
             </div>
@@ -562,9 +481,7 @@ NO ECHO:
                 onChange={(e) => setPatientLang(e.target.value)}
               >
                 {LANG_OPTS.map((o) => (
-                  <option key={o.code} value={o.code}>
-                    {o.label}
-                  </option>
+                  <option key={o.code} value={o.code}>{o.label}</option>
                 ))}
               </select>
             </div>
@@ -572,7 +489,7 @@ NO ECHO:
         </div>
 
         <div className="hdr-right">
-          {/* Hidden on mobile via CSS; shown in drawer on mobile */}
+          {/* Hidden on mobile header; shown in drawer */}
           <ThemeSwitch
             checked={theme === "dark"}
             onChange={toggleTheme}
@@ -582,7 +499,7 @@ NO ECHO:
           <Hamburger open={menuOpen} onToggle={() => setMenuOpen((v) => !v)} />
         </div>
 
-        {/* Mobile drawer */}
+        {/* Drawer (mobile) */}
         <div className={`drawer ${menuOpen ? "open" : ""}`}>
           <div className="drawer-panel">
             <div className="drawer-h">
@@ -599,9 +516,7 @@ NO ECHO:
                   onChange={(e) => setReceptionistLang(e.target.value)}
                 >
                   {LANG_OPTS.map((o) => (
-                    <option key={o.code} value={o.code}>
-                      {o.label}
-                    </option>
+                    <option key={o.code} value={o.code}>{o.label}</option>
                   ))}
                 </select>
               </label>
@@ -614,9 +529,7 @@ NO ECHO:
                   onChange={(e) => setPatientLang(e.target.value)}
                 >
                   {LANG_OPTS.map((o) => (
-                    <option key={o.code} value={o.code}>
-                      {o.label}
-                    </option>
+                    <option key={o.code} value={o.code}>{o.label}</option>
                   ))}
                 </select>
               </label>
@@ -648,9 +561,8 @@ NO ECHO:
         </div>
       </header>
 
-      {/* ── Main ───────────────────────────────────────────────────────────── */}
       <main className="rt2-main">
-        {/* Cards first (above the orb) */}
+        {/* Cards */}
         <div className="cards raised">
           <section className="card" aria-live="polite">
             <div className="card-h">
@@ -661,11 +573,11 @@ NO ECHO:
               <span className="chip">{labelOf(receptionistLang)}</span>
             </div>
             <div className="card-b">
-              {leftTranscript || safeAssistLive || safeUserLive ? (
+              {leftTranscript || stripRealtimeTags(liveAssistLine) || stripRealtimeTags(liveUserLine) ? (
                 <>
                   {leftTranscript}
-                  {!leftTranscript && (safeAssistLive || safeUserLive) ? (
-                    <span> {safeAssistLive || safeUserLive}</span>
+                  {!leftTranscript && (stripRealtimeTags(liveAssistLine) || stripRealtimeTags(liveUserLine)) ? (
+                    <span> {stripRealtimeTags(liveAssistLine) || stripRealtimeTags(liveUserLine)}</span>
                   ) : null}
                 </>
               ) : (
@@ -683,11 +595,11 @@ NO ECHO:
               <span className="chip">{labelOf(patientLang)}</span>
             </div>
             <div className="card-b">
-              {rightTranscript || safeAssistLive || safeUserLive ? (
+              {rightTranscript || stripRealtimeTags(liveAssistLine) || stripRealtimeTags(liveUserLine) ? (
                 <>
                   {rightTranscript}
-                  {!rightTranscript && (safeAssistLive || safeUserLive) ? (
-                    <span> {safeAssistLive || safeUserLive}</span>
+                  {!rightTranscript && (stripRealtimeTags(liveAssistLine) || stripRealtimeTags(liveUserLine)) ? (
+                    <span> {stripRealtimeTags(liveAssistLine) || stripRealtimeTags(liveUserLine)}</span>
                   ) : null}
                 </>
               ) : (
@@ -697,7 +609,7 @@ NO ECHO:
           </section>
         </div>
 
-        {/* Orb below (shell size retained; inner canvas footprint smaller on mobile) */}
+        {/* ORB (order will move above cards on mobile via CSS) */}
         <div className="orb-row">
           <div className="orb-shell small" aria-label="Audio visualizer">
             <BaseOrb />
@@ -705,7 +617,6 @@ NO ECHO:
         </div>
       </main>
 
-      {/* Bright-green Mic FAB (smaller icon, green pulse when active) */}
       <div className="fab-wrap">
         <button
           className={`fab ${listening ? "on" : ""}`}

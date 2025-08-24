@@ -1,14 +1,11 @@
 /* RealtimeTranslator.css
-   - Cards ABOVE the orb
-   - Active FAB: bright green with green pulse; smaller icon
-   - Dark theme cyan across UI
-   - ORB shell sizing here; inner canvas footprint handled in BaseOrb.css
-   - Scroll INSIDE cards with visible, slim scrollbars
+   - Mobile: ORB appears ABOVE cards (CSS order)
+   - Cards are fixed-height and scroll internally
+   - Light theme: transparent orb canvas (set in BaseOrb.jsx)
+   - Dark theme: cyan accents
 */
 
-/* ─────────────────────────────────────────────────────────────────────────── */
-/* Base + Themes                                                               */
-/* ─────────────────────────────────────────────────────────────────────────── */
+/* ───────────────── Base + Themes ───────────────── */
 
 :root {
   --bg: #f7f9fb;
@@ -21,7 +18,7 @@
   --ring: rgba(47, 128, 237, 0.25);
 
   --success: #10b981;
-  --green: #22c55e; /* bright green for active FAB */
+  --green: #22c55e;
   --warn: #f59e0b;
   --danger: #ef4444;
 
@@ -29,14 +26,13 @@
   --shadow: 0 14px 40px rgba(2, 8, 23, 0.07), 0 6px 16px rgba(2, 8, 23, 0.05);
 }
 
-/* Dark: cyan everywhere */
 [data-theme="dark"] {
   --bg: #050a12;
   --card: #0b1320;
   --ink: #e6faff;
   --muted: #9cc7d6;
 
-  --accent: #22d3ee; /* cyan */
+  --accent: #22d3ee;
   --accent-ghost: rgba(34, 211, 238, 0.20);
   --ring: rgba(34, 211, 238, 0.32);
 
@@ -54,14 +50,11 @@
 
 html, body, #root { height: 100%; }
 
-/* Hide global horizontal scrollbar; verticale ok per la pagina */
 html, body {
   margin: 0;
   color: var(--ink);
   background: var(--bg);
-  font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
-    Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
   overflow-x: hidden;
 }
 
@@ -77,9 +70,7 @@ select:focus-visible, button:focus-visible {
   border-radius: 12px;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────── */
-/* Header + Bar                                                                */
-/* ─────────────────────────────────────────────────────────────────────────── */
+/* ───────────────── Header ───────────────── */
 
 .rt2-app { min-height: 100vh; background: var(--bg); color: var(--ink); }
 
@@ -92,7 +83,6 @@ select:focus-visible, button:focus-visible {
   border-bottom: 1px solid color-mix(in oklab, var(--ink), transparent 88%);
 }
 
-/* Brand */
 .brand { display:flex; align-items:center; gap:10px; font-weight:800; }
 .brand .logo{
   width:28px;height:28px;border-radius:8px;
@@ -102,7 +92,6 @@ select:focus-visible, button:focus-visible {
 .brand-title{ font-size:15px; }
 .brand-sub{ font-size:12px; color:var(--muted); font-weight:600; }
 
-/* Desktop language pickers (hidden on mobile) */
 .langbar { display:flex; align-items:center; justify-content:center; gap:14px; }
 .lang { display:flex; align-items:center; gap:10px; padding: 4px 0; }
 .lang-role { font-size: 12px; color: var(--muted); font-weight: 900; }
@@ -116,20 +105,19 @@ select:focus-visible, button:focus-visible {
   appearance:none; padding:11px 38px 11px 12px; border-radius:12px;
   border:1px solid color-mix(in oklab, var(--ink), transparent 87%);
   background: var(--card); color: var(--ink); font-weight:700;
-  transition: border-color .12s ease, box-shadow .12s ease;
 }
 .langbar select:hover{ border-color: color-mix(in oklab, var(--ink), transparent 78%); }
 .langbar select:focus-visible{ border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 .lang-swap{ color:var(--muted); font-weight:900; }
 
-/* Header right */
 .hdr-right{ justify-self:end; display:flex; align-items:center; gap:10px; }
-/* Nascondi ThemeSwitch nel header mobile; resta nel drawer */
+
+/* Hide ThemeSwitch in header on mobile; it remains inside the drawer */
 @media (max-width: 1024px){
   .hdr-right .switch { display: none !important; }
 }
 
-/* Connection pill */
+/* Pills */
 .pill{
   font-size:12px; padding:6px 10px; border-radius:999px;
   border:1px solid color-mix(in oklab, var(--ink), transparent 85%);
@@ -164,7 +152,7 @@ select:focus-visible, button:focus-visible {
 .hamburger.open span:nth-child(2){ opacity:0; }
 .hamburger.open span:nth-child(3){ transform: translateY(-6px) rotate(-45deg); }
 
-/* Drawer (mobile only) */
+/* Drawer */
 .drawer{ position:fixed; inset:0; pointer-events:none; }
 .drawer.open{ pointer-events:auto; }
 .drawer-panel{
@@ -199,33 +187,33 @@ select:focus-visible, button:focus-visible {
 }
 .drawer-action.connected{ background:#16a34a; }
 
-/* ─────────────────────────────────────────────────────────────────────────── */
-/* Main + ORB                                                                  */
-/* ─────────────────────────────────────────────────────────────────────────── */
+/* ───────────────── Main (flex column so we can reorder on mobile) ───────────────── */
 
 .rt2-main{
   max-width: 1160px;
-  margin: 16px auto 96px; /* extra bottom space so FAB never overlaps */
+  margin: 16px auto 96px;
   padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px; /* makes spacing uniform when order changes */
 }
 
-/* Cards ABOVE the orb */
+/* Cards grid */
 .cards{
   display:grid; gap:18px; grid-template-columns: 1fr 1fr;
   margin-top: 6px;
 }
 .cards.raised{ transform: translateY(0); }
 
-/* Altezza fissa/responsiva delle card: il contenuto scorre dentro */
+/* Fixed/responsive height; text scrolls inside */
 .card{
   background: var(--card);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   border: 1px solid color-mix(in oklab, var(--ink), transparent 90%);
   height: clamp(240px, 32vh, 360px);
-  display:flex; flex-direction:column; min-height: 0; /* important for flex children overflow */
+  display:flex; flex-direction:column; min-height: 0;
 }
-
 .card-h{
   display:flex; align-items:center; justify-content:space-between;
   padding: 14px 16px;
@@ -238,44 +226,28 @@ select:focus-visible, button:focus-visible {
   font-size:12px; padding:6px 10px; border-radius: 10px;
   background: var(--accent-ghost); color: var(--accent); font-weight:900;
 }
-
-/* Area testo scrollabile, senza alterare il layout */
 .card-b{
   padding: 14px 16px;
   flex: 1 1 auto;
-  overflow: auto;                 /* scroll interno */
-  -webkit-overflow-scrolling: touch; /* momentum iOS */
-  overscroll-behavior: contain;   /* evita trascinare la pagina */
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   line-height:1.6; color:var(--ink);
   white-space: pre-wrap;
   font-size: 15px;
-  min-height: 0;                  /* fondamentale per il flex container */
+  min-height: 0;
 }
 
-/* Scrollbar sottili e visibili */
+/* Slim visible scrollbars */
 .card-b::-webkit-scrollbar { width: 8px; height: 8px; }
-.card-b::-webkit-scrollbar-track {
-  background: color-mix(in oklab, var(--ink), transparent 94%);
-  border-radius: 10px;
-}
-.card-b::-webkit-scrollbar-thumb {
-  background: color-mix(in oklab, var(--ink), transparent 70%);
-  border-radius: 10px;
-}
-.card-b::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in oklab, var(--ink), transparent 60%);
-}
-
-/* Firefox */
-.card-b{
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklab, var(--ink), transparent 70%)
-                   color-mix(in oklab, var(--ink), transparent 94%);
-}
+.card-b::-webkit-scrollbar-track { background: color-mix(in oklab, var(--ink), transparent 94%); border-radius: 10px; }
+.card-b::-webkit-scrollbar-thumb { background: color-mix(in oklab, var(--ink), transparent 70%); border-radius: 10px; }
+.card-b::-webkit-scrollbar-thumb:hover { background: color-mix(in oklab, var(--ink), transparent 60%); }
+.card-b{ scrollbar-width: thin; scrollbar-color: color-mix(in oklab, var(--ink), transparent 70%) color-mix(in oklab, var(--ink), transparent 94%); }
 
 .placeholder{ color: var(--muted); }
 
-/* Orb below the cards (shell size here; canvas footprint in BaseOrb.css) */
+/* ORB shell; canvas footprint is controlled in BaseOrb.css */
 .orb-row{ display:flex; justify-content:center; }
 .orb-shell{
   width: min(86vw, 520px);
@@ -287,16 +259,13 @@ select:focus-visible, button:focus-visible {
     var(--card) 72%
   );
   box-shadow: var(--shadow), inset 0 0 0 1px color-mix(in oklab, var(--ink), transparent 90%);
-  display:grid; place-items:center; margin: 8px auto 4px;
+  display:grid; place-items:center;
+  margin: 8px auto 4px;
   overflow:hidden;
 }
-.orb-shell.small{
-  width: min(74vw, 420px);   /* retain shell size; canvas shrinks inside via BaseOrb.css */
-}
+.orb-shell.small{ width: min(74vw, 420px); }
 
-/* ─────────────────────────────────────────────────────────────────────────── */
-/* Mic Floating Action Button (bright green active + smaller icon)             */
-/* ─────────────────────────────────────────────────────────────────────────── */
+/* ───────────────── FAB (mic) ───────────────── */
 
 .fab-wrap{
   position: fixed; left: 50%; transform: translateX(-50%);
@@ -313,11 +282,9 @@ select:focus-visible, button:focus-visible {
 .fab:hover{ transform: translateY(-1px); }
 .fab:active{ transform: translateY(0); }
 
-/* Smaller icon inside */
 .fab .fab-icon{ width: 22px; height: 22px; display:block; }
 .fab .mic-shape { filter: drop-shadow(0 2px 6px rgba(0,0,0,.15)); }
 
-/* Green state + pulse */
 .fab.on{ background: var(--green); }
 .fab .rt-fab-ring{
   position:absolute; inset:-8px; border-radius:999px;
@@ -331,19 +298,22 @@ select:focus-visible, button:focus-visible {
 }
 .fab[disabled]{ opacity: .65; cursor:not-allowed; }
 
-/* ─────────────────────────────────────────────────────────────────────────── */
-/* Responsive                                                                  */
-/* ─────────────────────────────────────────────────────────────────────────── */
+/* ───────────────── Responsive ───────────────── */
 
 @media (max-width: 1024px){
   .hamburger{ display:inline-flex; }
-  .langbar{ display:none; }         /* mobile uses drawer only */
+  .langbar{ display:none; } /* mobile uses drawer only */
 }
 
+/* Reorder on mobile: ORB on top, cards below */
 @media (max-width: 900px){
-  .rt2-header{ grid-template-columns: 1fr auto; grid-template-rows: auto; }
+  .rt2-header{ grid-template-columns: 1fr auto; }
   .cards{ grid-template-columns: 1fr; }
-  .card{ height: clamp(220px, 34vh, 340px); } /* un filo più alta su tablet */
+  .card{ height: clamp(220px, 34vh, 340px); }
+
+  /* Move ORB above the cards */
+  .orb-row{ order: -1; }
+  /* .cards keep default order (0), so they appear after orb */
   .orb-shell.small{ width: min(78vw, 380px); }
 }
 
@@ -351,8 +321,8 @@ select:focus-visible, button:focus-visible {
   .rt2-header{ padding: 10px 12px; gap:10px; }
   .card-h{ padding: 12px 12px; }
   .card-b{ padding: 12px 12px; font-size: 14.5px; }
-  .card{ height: clamp(210px, 36vh, 320px); }  /* mobile: fissa e scorrevole */
+  .card{ height: clamp(210px, 36vh, 320px); }
   .fab{ width: 58px; height: 58px; }
   .fab .fab-icon{ width: 20px; height: 20px; }
-  .orb-shell.small{ width: min(72vw, 320px); } /* shell resta, canvas si riduce in BaseOrb.css */
+  .orb-shell.small{ width: min(72vw, 320px); }
 }

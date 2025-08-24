@@ -6,6 +6,10 @@
 // - Resizes to container; canvas footprint can be smaller than shell via CSS.
 // - Particle radius scales with audio.
 
+// src/components/BaseOrb.jsx
+// Transparent canvas in BOTH themes; cyan particles in dark, blue in light.
+// Responsive to container; inner footprint shrinks on mobile via CSS.
+
 import React, { useEffect, useRef, useState } from "react";
 import "../styles/BaseOrb.css";
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore";
@@ -13,8 +17,6 @@ import { enhanceAudioScale } from "./audioLevelAnalyzer";
 
 const BaseOrb = () => {
   const canvasRef = useRef(null);
-
-  // read store every frame (enhanced for visual pop)
   const audioScale = useAudioForVisualizerStore((state) =>
     enhanceAudioScale(state.audioScale)
   );
@@ -25,7 +27,6 @@ const BaseOrb = () => {
       : false
   );
 
-  // Observe theme changes (ThemeSwitch toggles [data-theme])
   useEffect(() => {
     if (typeof MutationObserver === "undefined") return;
     const root = document.documentElement;
@@ -36,7 +37,6 @@ const BaseOrb = () => {
     return () => mo.disconnect();
   }, []);
 
-  // Handle canvas DPI + responsiveness
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -58,17 +58,14 @@ const BaseOrb = () => {
     const ro = new ResizeObserver(fit);
     ro.observe(canvas);
 
-    // particle system
-    let sphereRad = 240; // recomputed per frame
+    let sphereRad = 240;
     let radius_sp = Math.max(0.7, audioScale);
 
     const fLen = 320;
     const particleAlpha = 1;
     const colorLight = "rgba(0,123,255,";   // blue
     const colorDark = "rgba(34,211,238,";   // cyan
-    const randAccelX = 0.1;
-    const randAccelY = 0.1;
-    const randAccelZ = 0.1;
+    const randAccelX = 0.1, randAccelY = 0.1, randAccelZ = 0.1;
     const gravity = 0;
     const particleRad = 2.5;
     const zeroAlphaDepth = -750;
@@ -124,11 +121,8 @@ const BaseOrb = () => {
 
     const onFrame = () => {
       raf = requestAnimationFrame(onFrame);
-
-      // ensure canvas matches CSS box
       fit();
 
-      // center + dynamic sizing
       const projCenterX = canvas.width / 2;
       const projCenterY = canvas.height / 2;
       sphereRad = Math.max(120, Math.min(canvas.width, canvas.height) * 0.34);
@@ -137,7 +131,6 @@ const BaseOrb = () => {
       const raw = useAudioForVisualizerStore.getState().audioScale;
       radius_sp = Math.max(0.7, enhanceAudioScale(raw));
 
-      // spawn particles
       if (++count >= 1) {
         count = 0;
         for (let i = 0; i < 8; i++) {
@@ -157,7 +150,7 @@ const BaseOrb = () => {
       const sinAngle = Math.sin(turnAngle);
       const cosAngle = Math.cos(turnAngle);
 
-      // Transparent canvas for BOTH themes
+      // Transparent canvas always
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       canvas.style.backgroundColor = "transparent";
 
@@ -185,40 +178,27 @@ const BaseOrb = () => {
 
         if (p.age < p.attack + p.hold + p.decay) {
           if (p.age < p.attack) {
-            p.alpha =
-              ((p.holdValue - p.initValue) / p.attack) * p.age + p.initValue;
+            p.alpha = ((p.holdValue - p.initValue) / p.attack) * p.age + p.initValue;
           } else if (p.age < p.attack + p.hold) {
             p.alpha = p.holdValue;
           } else {
-            p.alpha =
-              ((p.lastValue - p.holdValue) / p.decay) *
-                (p.age - p.attack - p.hold) +
-              p.holdValue;
+            p.alpha = ((p.lastValue - p.holdValue) / p.decay) * (p.age - p.attack - p.hold) + p.holdValue;
           }
-        } else {
-          p.dead = true;
-        }
+        } else p.dead = true;
 
         const outOfView =
-          p.projX > canvas.width ||
-          p.projX < 0 ||
-          p.projY > canvas.height ||
-          p.projY < 0 ||
-          rotZ > zMax;
+          p.projX > canvas.width || p.projX < 0 ||
+          p.projY > canvas.height || p.projY < 0 || rotZ > zMax;
 
         if (outOfView || p.dead) {
           recycle(p);
         } else {
-          const depthAlphaFactor = Math.min(
-            1,
-            Math.max(0, 1 - rotZ / zeroAlphaDepth)
-          );
+          const depthAlphaFactor = Math.min(1, Math.max(0, 1 - rotZ / zeroAlphaDepth));
           ctx.fillStyle = rgbString + depthAlphaFactor * p.alpha + ")";
           ctx.beginPath();
           ctx.arc(p.projX, p.projY, Math.max(0.5, m * particleRad), 0, 2 * Math.PI);
           ctx.fill();
         }
-
         p = next;
       }
     };
@@ -235,10 +215,8 @@ const BaseOrb = () => {
       className="base-orb"
       id="base-orb"
       ref={canvasRef}
-      /* Width/height are handled by CSS; backing store is set via ResizeObserver */
     />
   );
 };
 
 export default BaseOrb;
-
