@@ -3,12 +3,6 @@
 // Soft glass UI, responsive, single "Listen" button (toggle), pure VAD turn-taking,
 // bilingual auto-detect → translate to the opposite language, echo/duplicate suppression.
 
-// ✅ This version keeps ONLY three UI sections:
-//    1) Transcript log
-//    2) Translation → Patient
-//    3) Translation → Receptionist
-//    (Removed summary/patient details UI entirely.)
-
 import React, { useEffect, useRef, useState } from "react";
 import AudioWave from "./AudioWave";
 import "../styles/RealtimeTranslator.css";
@@ -90,24 +84,38 @@ export default function RealtimeTranslator() {
   const [remoteStream, setRemoteStream] = useState(null);
 
   // Transcripts
-  const [transcriptLog, setTranscriptLog] = useState("");
+  const [englishTranscript, setEnglishTranscript] = useState("");
   const [liveUserLine, setLiveUserLine] = useState("");
+  const [liveAssistLine, setLiveAssistLine] = useState("");
   const transcriptRef = useRef(null);
 
-  // Tagged translations (only two panes kept)
+  // Tagged translations + summary
   const [toPatientText, setToPatientText] = useState("");
   const [toReceptionistText, setToReceptionistText] = useState("");
+  const [summaryText, setSummaryText] = useState("");
+
+  // Patient details (optional from [[SUMMARY]])
+  const [patientName, setPatientName] = useState("");
+  const [patientAge, setPatientAge] = useState("");
+  const [fileNumber, setFileNumber] = useState("");
 
   // Duplicate/echo suppression (avoid repeating same line)
   const recentMapRef = useRef(new Map()); // normLine -> timestamp(ms)
   const RECENT_WINDOW_MS = 7000;
+
+  const mergeDetailsFromSummary = (obj) => {
+    if (!obj || typeof obj !== "object") return;
+    if (obj.name && !patientName) setPatientName(obj.name);
+    if (obj.age && !patientAge) setPatientAge(String(obj.age));
+    if (obj.file_number && !fileNumber) setFileNumber(String(obj.file_number));
+  };
 
   // Auto-scroll transcript
   useEffect(() => {
     const el = transcriptRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [transcriptLog, liveUserLine, toPatientText, toReceptionistText]);
+  }, [englishTranscript, liveUserLine, liveAssistLine]);
 
   // Instructions builder: auto-detect speaker language, translate to the OTHER one
   function buildInstructions(recLang, patLang) {
@@ -135,14 +143,13 @@ STRICT OUTPUT:
 - Allowed tags: [[TO_PATIENT]], [[TO_RECEPTIONIST]], [[SUMMARY]]
 - Exactly ONE tagged translation per turn. No combined tags.
 - Keep translations concise, faithful, and neutral. No added advice or content.
-- Do NOT output any untagged lines.
 
 ECHO-LOOP AVOIDANCE:
 - Do NOT re-translate your own synthetic speech or previous output.
 - If the input matches your prior output (same content, opposite direction), ignore it.
 
 OPTIONAL SUMMARY (only if explicitly stated by speakers):
-- [[SUMMARY]] {"reason_for_visit":"...","department":"...","urgency":"...","notes":"..."} — include only fields explicitly mentioned.
+- [[SUMMARY]] {"reason_for_visit":"...","department":"...","urgency":"...","file_number":"...","name":"...","age":0,"notes":"..."} — include only fields explicitly mentioned.
 
 NO HALLUCINATIONS:
 - Do not invent names, IDs, symptoms, or facts not spoken.
@@ -254,7 +261,7 @@ NO HALLUCINATIONS:
                 type: "server_vad",
                 threshold: 0.77,          // slightly stricter to avoid rushing
                 prefix_padding_ms: 300,
-                silence_duration_ms: 1000, // a bit longer to reduce partials
+                silence_duration_ms: 1000, // wait a bit longer before responding
               },
               input_audio_transcription: {
                 model: "gpt-4o-mini-transcribe",
@@ -300,7 +307,9 @@ NO HALLUCINATIONS:
             liveByItem.delete(id);
             setLiveUserLine("");
             if (full)
-              setTranscriptLog((prev) => (prev ? prev + "\n" + full : full));
+              setEnglishTranscript((prev) =>
+                prev ? prev + "\n" + full : full
+              );
             return;
           }
 
@@ -330,6 +339,7 @@ NO HALLUCINATIONS:
                   setToPatientText((prev) =>
                     prev ? prev + "\n" + content : content
                   );
+                setLiveAssistLine("");
                 continue;
               }
 
@@ -343,27 +353,42 @@ NO HALLUCINATIONS:
                   setToReceptionistText((prev) =>
                     prev ? prev + "\n" + content : content
                   );
+                setLiveAssistLine("");
                 continue;
               }
 
-              // Ignore [[SUMMARY]] lines entirely (frontend no longer shows them)
               if (line.startsWith("[[SUMMARY]]")) {
-                // intentionally no-op
+                const jsonPart = line.slice("[[SUMMARY]]".length).trim();
+                try {
+                  const obj = JSON.parse(jsonPart);
+                  const parts = [];
+                  if (obj.reason_for_visit)
+                    parts.push(`Reason: ${obj.reason_for_visit}`);
+                  if (obj.department) parts.push(`Dept: ${obj.department}`);
+                  if (obj.urgency) parts.push(`Urgency: ${obj.urgency}`);
+                  if (obj.notes) parts.push(`Notes: ${obj.notes}`);
+                  setSummaryText(parts.join(" • "));
+                  mergeDetailsFromSummary(obj);
+                } catch {}
+                setLiveAssistLine("");
                 continue;
               }
 
-              // Un-tagged log line (rare; we still keep it in transcript for debugging)
+              // Un-tagged log line
               const nlog = norm(line);
               if (nlog) recentMapRef.current.set(nlog, Date.now());
-              setTranscriptLog((prev) => (prev ? prev + "\n" + line : line));
+              setEnglishTranscript((prev) => (prev ? prev + "\n" + line : line));
+              setLiveAssistLine("");
             }
 
-            // IMPORTANT: We DO NOT render assistant partials to avoid partial hallucinations.
+            // show partials while waiting for newline
+            setLiveAssistLine(assistBuffer.trim());
             return;
           }
 
           // --- A response was fully completed ---
           if (t === "response.completed") {
+            setLiveAssistLine("");
             return;
           }
         } catch {
@@ -374,12 +399,14 @@ NO HALLUCINATIONS:
       dc.onclose = () => {
         setStatus("idle");
         setLiveUserLine("");
+        setLiveAssistLine("");
         setListening(false);
         setTrackEnabled(false);
       };
       dc.onerror = () => {
         setStatus("error");
         setLiveUserLine("");
+        setLiveAssistLine("");
         setListening(false);
         setTrackEnabled(false);
       };
@@ -565,7 +592,7 @@ NO HALLUCINATIONS:
           </div>
         </div>
 
-        {/* Mobile drawer (aligned, proportional, uncluttered) */}
+        {/* Mobile drawer */}
         <div className={`rt-drawer ${menuOpen ? "open" : ""}`}>
           <div className="rt-drawer-inner">
             <div className="rt-drawer-row">
@@ -623,13 +650,11 @@ NO HALLUCINATIONS:
               </span>
             </button>
 
-            <div className="rt-drawer-theme">
-              <ThemeSwitch
-                checked={theme === "dark"}
-                onChange={toggleTheme}
-                ariaLabel="Toggle theme"
-              />
-            </div>
+            <ThemeSwitch
+              checked={theme === "dark"}
+              onChange={toggleTheme}
+              ariaLabel="Toggle theme"
+            />
           </div>
         </div>
         {menuOpen && (
@@ -654,16 +679,22 @@ NO HALLUCINATIONS:
         <div className="rt-container">
           <section className="rt-card animate-card">
             <div className="rt-card-section">
-              <h3 className="rt-title">Transcript log</h3>
+              <h3 className="rt-title">English transcript (log)</h3>
               <div className="rt-box rt-transcript" ref={transcriptRef}>
-                {transcriptLog ? transcriptLog + "\n" : ""}
+                {englishTranscript ? englishTranscript + "\n" : ""}
                 {liveUserLine && (
                   <span>
                     {liveUserLine}
                     <span className="rt-live-line" aria-hidden />
                   </span>
                 )}
-                {!transcriptLog && !liveUserLine && (
+                {!liveUserLine && liveAssistLine && (
+                  <span>
+                    {liveAssistLine}
+                    <span className="rt-live-line" aria-hidden />
+                  </span>
+                )}
+                {!englishTranscript && !liveUserLine && !liveAssistLine && (
                   <span className="rt-placeholder">Waiting…</span>
                 )}
               </div>
@@ -714,11 +745,7 @@ NO HALLUCINATIONS:
 
         <div className={`rt-fab-status ${status}`}>
           {status === "connecting" ? "Connecting…" : status}
-          {status === "connected"
-            ? listening
-              ? " • listening"
-              : " • paused"
-            : ""}
+          {status === "connected" ? (listening ? " • listening" : " • paused") : ""}
         </div>
       </div>
     </div>
