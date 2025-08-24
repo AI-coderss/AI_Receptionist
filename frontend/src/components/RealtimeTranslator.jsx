@@ -2,13 +2,14 @@
 // src/components/RealtimeTranslator.jsx
 // Soft glass UI, responsive, single "Listen" button (toggle), pure VAD turn-taking,
 // bilingual auto-detect → translate to the opposite language, echo/duplicate suppression.
+// UPDATE: Hide [[TO_PATIENT]], [[TO_RECEPTIONIST]], [[SUMMARY]] tags from all rendered UI.
 
 import React, { useEffect, useRef, useState } from "react";
 import AudioWave from "./AudioWave";
 import "../styles/RealtimeTranslator.css";
 import ThemeSwitch from "./ThemeSwitch";
 
-const SIGNAL_URL = "https://ai-receptionist-webrtc-server.onrender.com/api/rtc-connect";
+const SIGNAL_URL = " https://ai-receptionist-assistant-dsah.onrender.com/api/rtc-connect";
 
 // Public-folder logo path (place your file in /public)
 const LOGO_PATH = "/logo.png";
@@ -43,6 +44,10 @@ const LANG_OPTS = [
 ];
 const labelOf = (c) => LANG_OPTS.find((x) => x.code === c)?.label || c;
 
+// ---------- Helpers ----------
+const TAG_TOKEN_RE = /\s*\[\[(?:TO_PATIENT|TO_RECEPTIONIST|SUMMARY)\]\]\s*/g;
+const stripRealtimeTags = (s) => (s || "").replace(TAG_TOKEN_RE, "").trim();
+
 // normalize a line to suppress near-duplicates
 const norm = (s) =>
   (s || "")
@@ -50,6 +55,15 @@ const norm = (s) =>
     .replace(/[.?!،۔]+$/u, "")
     .trim()
     .toLowerCase();
+
+// very light lang sniff (kept for Chinese-first testing)
+function guessLangCode(s) {
+  if (!s) return null;
+  if (/[\u4E00-\u9FFF]/.test(s)) return "zh"; // Chinese chars
+  if (/[\u0600-\u06FF]/.test(s)) return "ar"; // Arabic
+  if (/[\u0400-\u04FF]/.test(s)) return "ru"; // Cyrillic
+  return "latn"; // generic latin
+}
 
 export default function RealtimeTranslator() {
   const [status, setStatus] = useState("idle"); // idle | connecting | connected | error
@@ -89,26 +103,16 @@ export default function RealtimeTranslator() {
   const [liveAssistLine, setLiveAssistLine] = useState("");
   const transcriptRef = useRef(null);
 
-  // Tagged translations + summary
+  // Tagged translations
   const [toPatientText, setToPatientText] = useState("");
   const [toReceptionistText, setToReceptionistText] = useState("");
-  const [summaryText, setSummaryText] = useState("");
-
-  // Patient details (optional from [[SUMMARY]])
-  const [patientName, setPatientName] = useState("");
-  const [patientAge, setPatientAge] = useState("");
-  const [fileNumber, setFileNumber] = useState("");
 
   // Duplicate/echo suppression (avoid repeating same line)
   const recentMapRef = useRef(new Map()); // normLine -> timestamp(ms)
   const RECENT_WINDOW_MS = 7000;
 
-  const mergeDetailsFromSummary = (obj) => {
-    if (!obj || typeof obj !== "object") return;
-    if (obj.name && !patientName) setPatientName(obj.name);
-    if (obj.age && !patientAge) setPatientAge(String(obj.age));
-    if (obj.file_number && !fileNumber) setFileNumber(String(obj.file_number));
-  };
+  // Per-response accumulator so we can correlate audio_transcript with text tag
+  const responseMapRef = useRef(new Map()); // response_id -> { textBuf, audioBuf, target: 'PATIENT'|'RECEPTIONIST'|null }
 
   // Auto-scroll transcript
   useEffect(() => {
@@ -138,10 +142,10 @@ TURNING & TIMING (VAD):
 - Wait for a complete utterance (VAD end-of-speech) BEFORE replying.
 - Never interrupt or speak during input; remain silent between turns.
 
-STRICT OUTPUT:
-- Newline-delimited frames.
-- Allowed tags: [[TO_PATIENT]], [[TO_RECEPTIONIST]], [[SUMMARY]]
-- Exactly ONE tagged translation per turn. No combined tags.
+STRICT OUTPUT CHANNELS:
+- You MUST always send a one-line tag on the TEXT channel (newline-delimited).
+- Allowed tags: [[TO_PATIENT]] or [[TO_RECEPTIONIST]] (exactly ONE per turn).
+- DO NOT speak these tags aloud; the AUDIO must contain the translation only.
 - Keep translations concise, faithful, and neutral. No added advice or content.
 
 ECHO-LOOP AVOIDANCE:
@@ -243,7 +247,6 @@ NO HALLUCINATIONS:
 
       // Live user transcripts keyed by item_id
       const liveByItem = new Map();
-      let assistBuffer = "";
 
       dc.onopen = () => {
         setStatus("connected");
@@ -259,18 +262,25 @@ NO HALLUCINATIONS:
               instructions,
               turn_detection: {
                 type: "server_vad",
-                threshold: 0.77,          // slightly stricter to avoid rushing
+                threshold: 0.77,
                 prefix_padding_ms: 300,
-                silence_duration_ms: 1000, // wait a bit longer before responding
+                silence_duration_ms: 1000,
               },
               input_audio_transcription: {
                 model: "gpt-4o-mini-transcribe",
-                // omit 'language' to allow bilingual auto-detection
+                // omit 'language' to allow bilingual auto-detect
               },
             },
           })
         );
       };
+
+      function ensureRespSlot(id) {
+        const key = id || "default";
+        const map = responseMapRef.current;
+        if (!map.has(key)) map.set(key, { textBuf: "", audioBuf: "", target: null });
+        return map.get(key);
+      }
 
       dc.onmessage = (evt) => {
         // prune old duplicates window periodically
@@ -280,7 +290,6 @@ NO HALLUCINATIONS:
           if (now - ts > RECENT_WINDOW_MS) map.delete(k);
         }
 
-        // Handle events
         try {
           const msg = JSON.parse(evt.data);
           const t = msg?.type;
@@ -308,47 +317,51 @@ NO HALLUCINATIONS:
             setLiveUserLine("");
             if (full)
               setEnglishTranscript((prev) =>
-                prev ? prev + "\n" + full : full
+                prev ? prev + "\n" + stripRealtimeTags(full) : stripRealtimeTags(full)
               );
             return;
           }
 
-          // --- Assistant text stream ---
-          if (t === "response.text.delta" && typeof msg.delta === "string") {
-            assistBuffer += msg.delta;
+          // --- Assistant text stream (support both shapes) ---
+          if (
+            (t === "response.text.delta" || t === "response.output_text.delta") &&
+            typeof msg.delta === "string"
+          ) {
+            const resp = ensureRespSlot(msg.response_id);
+            resp.textBuf += msg.delta;
 
+            // Process by lines whenever we get a newline in the text channel
             let nl;
-            while ((nl = assistBuffer.indexOf("\n")) >= 0) {
-              const line = assistBuffer.slice(0, nl).trim();
-              assistBuffer = assistBuffer.slice(nl + 1);
+            while ((nl = resp.textBuf.indexOf("\n")) >= 0) {
+              const raw = resp.textBuf.slice(0, nl);
+              resp.textBuf = resp.textBuf.slice(nl + 1);
 
+              const line = raw.trim();
               if (!line) continue;
 
               // Duplicate/echo suppression
               const nline = norm(line);
-              if (nline && recentMapRef.current.has(nline)) {
-                // Ignore duplicates seen very recently
-                continue;
-              }
+              if (nline && recentMapRef.current.has(nline)) continue;
 
               if (line.startsWith("[[TO_PATIENT]]")) {
-                const content = line.slice("[[TO_PATIENT]]".length).trim();
+                const content = stripRealtimeTags(
+                  line.slice("[[TO_PATIENT]]".length)
+                );
                 const nc = norm(content);
                 if (nc) recentMapRef.current.set(nc, Date.now());
+                resp.target = "PATIENT";
                 if (content)
-                  setToPatientText((prev) =>
-                    prev ? prev + "\n" + content : content
-                  );
+                  setToPatientText((prev) => (prev ? prev + "\n" + content : content));
                 setLiveAssistLine("");
                 continue;
               }
-
               if (line.startsWith("[[TO_RECEPTIONIST]]")) {
-                const content = line
-                  .slice("[[TO_RECEPTIONIST]]".length)
-                  .trim();
+                const content = stripRealtimeTags(
+                  line.slice("[[TO_RECEPTIONIST]]".length)
+                );
                 const nc = norm(content);
                 if (nc) recentMapRef.current.set(nc, Date.now());
+                resp.target = "RECEPTIONIST";
                 if (content)
                   setToReceptionistText((prev) =>
                     prev ? prev + "\n" + content : content
@@ -356,38 +369,67 @@ NO HALLUCINATIONS:
                 setLiveAssistLine("");
                 continue;
               }
-
               if (line.startsWith("[[SUMMARY]]")) {
-                const jsonPart = line.slice("[[SUMMARY]]".length).trim();
-                try {
-                  const obj = JSON.parse(jsonPart);
-                  const parts = [];
-                  if (obj.reason_for_visit)
-                    parts.push(`Reason: ${obj.reason_for_visit}`);
-                  if (obj.department) parts.push(`Dept: ${obj.department}`);
-                  if (obj.urgency) parts.push(`Urgency: ${obj.urgency}`);
-                  if (obj.notes) parts.push(`Notes: ${obj.notes}`);
-                  setSummaryText(parts.join(" • "));
-                  mergeDetailsFromSummary(obj);
-                } catch {}
+                // swallow summary lines from transcript/log entirely
                 setLiveAssistLine("");
                 continue;
               }
 
-              // Un-tagged log line
-              const nlog = norm(line);
+              // Un-tagged log line (rare) → sanitize and log
+              const cleaned = stripRealtimeTags(line);
+              const nlog = norm(cleaned);
               if (nlog) recentMapRef.current.set(nlog, Date.now());
-              setEnglishTranscript((prev) => (prev ? prev + "\n" + line : line));
+              if (cleaned)
+                setEnglishTranscript((prev) =>
+                  prev ? prev + "\n" + cleaned : cleaned
+                );
               setLiveAssistLine("");
             }
 
-            // show partials while waiting for newline
-            setLiveAssistLine(assistBuffer.trim());
+            // show partials while waiting for newline (sanitized)
+            setLiveAssistLine(stripRealtimeTags(resp.textBuf).trim());
             return;
           }
 
-          // --- A response was fully completed ---
-          if (t === "response.completed") {
+          // --- Assistant spoken transcript stream (what the model is saying) ---
+          if (t === "response.audio_transcript.delta" && typeof msg.delta === "string") {
+            const resp = ensureRespSlot(msg.response_id);
+            resp.audioBuf += msg.delta;
+            setLiveAssistLine(stripRealtimeTags(resp.audioBuf).trim()); // sanitized partial
+            return;
+          }
+
+          // --- Assistant spoken transcript finished ---
+          if (t === "response.audio_transcript.done") {
+            const resp = ensureRespSlot(msg.response_id);
+            const spoken = stripRealtimeTags(resp.audioBuf || "").trim();
+            setLiveAssistLine("");
+
+            if (spoken) {
+              if (resp.target === "PATIENT") {
+                setToPatientText((prev) => (prev ? prev + "\n" + spoken : spoken));
+              } else if (resp.target === "RECEPTIONIST") {
+                setToReceptionistText((prev) => (prev ? prev + "\n" + spoken : spoken));
+              } else {
+                // Fallback: guess language
+                const g = guessLangCode(spoken);
+                if (g === patientLang) {
+                  setToPatientText((prev) => (prev ? prev + "\n" + spoken : spoken));
+                } else if (g === receptionistLang || g === "latn") {
+                  setToReceptionistText((prev) => (prev ? prev + "\n" + spoken : spoken));
+                } else {
+                  setEnglishTranscript((prev) =>
+                    prev ? prev + "\n" + spoken : spoken
+                  );
+                }
+              }
+            }
+            if (msg.response_id) responseMapRef.current.delete(msg.response_id);
+            return;
+          }
+
+          // --- A response was fully completed (new + old name support) ---
+          if (t === "response.done" || t === "response.completed") {
             setLiveAssistLine("");
             return;
           }
@@ -402,6 +444,7 @@ NO HALLUCINATIONS:
         setLiveAssistLine("");
         setListening(false);
         setTrackEnabled(false);
+        responseMapRef.current.clear();
       };
       dc.onerror = () => {
         setStatus("error");
@@ -409,6 +452,7 @@ NO HALLUCINATIONS:
         setLiveAssistLine("");
         setListening(false);
         setTrackEnabled(false);
+        responseMapRef.current.clear();
       };
 
       const offer = await pc.createOffer({
@@ -473,7 +517,6 @@ NO HALLUCINATIONS:
             },
             input_audio_transcription: {
               model: "gpt-4o-mini-transcribe",
-              // keep language unspecified for auto-detect
             },
           },
         })
@@ -482,14 +525,15 @@ NO HALLUCINATIONS:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientLang, receptionistLang]);
 
+  // Pre-sanitized text for rendering
+  const safeTranscript = stripRealtimeTags(englishTranscript);
+  const safeAssistLive = stripRealtimeTags(liveAssistLine);
+  const safeToPatient = stripRealtimeTags(toPatientText);
+  const safeToReceptionist = stripRealtimeTags(toReceptionistText);
+
   return (
     <div className="rt-page">
-      <audio
-        ref={remoteAudioRef}
-        autoPlay
-        playsInline
-        style={{ display: "none" }}
-      />
+      <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: "none" }} />
 
       {/* Top Bar */}
       <div className="rt-topbar">
@@ -681,20 +725,20 @@ NO HALLUCINATIONS:
             <div className="rt-card-section">
               <h3 className="rt-title">English transcript (log)</h3>
               <div className="rt-box rt-transcript" ref={transcriptRef}>
-                {englishTranscript ? englishTranscript + "\n" : ""}
+                {safeTranscript ? safeTranscript + "\n" : ""}
                 {liveUserLine && (
                   <span>
                     {liveUserLine}
                     <span className="rt-live-line" aria-hidden />
                   </span>
                 )}
-                {!liveUserLine && liveAssistLine && (
+                {!liveUserLine && safeAssistLive && (
                   <span>
-                    {liveAssistLine}
+                    {safeAssistLive}
                     <span className="rt-live-line" aria-hidden />
                   </span>
                 )}
-                {!englishTranscript && !liveUserLine && !liveAssistLine && (
+                {!safeTranscript && !liveUserLine && !safeAssistLive && (
                   <span className="rt-placeholder">Waiting…</span>
                 )}
               </div>
@@ -703,7 +747,7 @@ NO HALLUCINATIONS:
             <div className="rt-card-section">
               <h3 className="rt-title">Translation → Patient</h3>
               <div className="rt-box rt-summary">
-                {toPatientText || (
+                {safeToPatient || (
                   <span className="rt-placeholder">Will appear here…</span>
                 )}
               </div>
@@ -712,7 +756,7 @@ NO HALLUCINATIONS:
             <div className="rt-card-section">
               <h3 className="rt-title">Translation → Receptionist</h3>
               <div className="rt-box rt-summary">
-                {toReceptionistText || (
+                {safeToReceptionist || (
                   <span className="rt-placeholder">Will appear here…</span>
                 )}
               </div>
@@ -725,9 +769,7 @@ NO HALLUCINATIONS:
       <div className="rt-ptt-wrap">
         <div className="rt-ptt-grid">
           <button
-            className={`rt-fab rt-fab--main ${
-              listening ? "on" : "off"
-            } ${status}`}
+            className={`rt-fab rt-fab--main ${listening ? "on" : "off"} ${status}`}
             title={listening ? "Listening (VAD on)" : "Click to start listening"}
             onClick={toggleListening}
             disabled={status === "connecting" || status === "error"}

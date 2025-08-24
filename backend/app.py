@@ -35,11 +35,11 @@ MODEL_ID = os.getenv("OPENAI_REALTIME_MODEL", "gpt-4o-realtime-preview-2024-12-1
 VOICE    = os.getenv("OPENAI_REALTIME_VOICE", "alloy")
 
 def _safe_temp():
-    try:
-        t = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
-    except ValueError:
-        t = 0.7
-    return max(0.6, min(t, 1.5))
+  try:
+      t = float(os.getenv("OPENAI_TEMPERATURE", "0.7"))
+  except ValueError:
+      t = 0.7
+  return max(0.6, min(t, 1.5))
 TEMPERATURE = _safe_temp()
 
 TRANSCRIBE_MODEL = os.getenv("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe")
@@ -82,11 +82,9 @@ TURNING & TIMING (VAD):
 - Wait for a complete utterance (VAD end-of-speech) BEFORE replying.
 - Never interrupt or speak during input; remain silent between turns.
 
-STRICT OUTPUT:
-- Newline-delimited frames.
-- Allowed tags: [[TO_PATIENT]], [[TO_RECEPTIONIST]], [[SUMMARY]]
-- Exactly ONE tagged translation per turn. No combined tags.
-- Keep translations concise, faithful, and neutral. No added advice or content.
+STRICT OUTPUT CHANNELS:
+- Always send exactly ONE tag on the TEXT channel (newline-delimited): [[TO_PATIENT]] or [[TO_RECEPTIONIST]].
+- Do NOT speak the tags. AUDIO must contain only the translation.
 
 ECHO-LOOP AVOIDANCE:
 - Do NOT re-translate your own synthetic speech or previous output.
@@ -134,7 +132,7 @@ def rtc_connect():
           "model": MODEL_ID,
           "voice": VOICE,
           "modalities": ["audio", "text"],
-          "temperature": TEMPERATURE,  # (min enforced by platform)
+          "temperature": TEMPERATURE,
           "instructions": instructions,
           "turn_detection": {
               "type": "server_vad",
@@ -144,7 +142,6 @@ def rtc_connect():
           },
           "input_audio_transcription": {
               "model": TRANSCRIBE_MODEL
-              # omit 'language' so STT can auto-detect either selected language
           }
       }
 
@@ -196,7 +193,3 @@ def rtc_connect():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8813, debug=True)
-
-
-
-
