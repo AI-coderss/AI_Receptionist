@@ -3,6 +3,7 @@
    - Excellent look & feel
    - Smaller floating "Listen" button
    - Mobile-first, smooth animations, safe-area aware
+   - Drawer controls aligned & proportionally scaled
    ========================================================= */
 
 /* Reset */
@@ -178,7 +179,7 @@ body {
 
 /* ---------------- Inputs & Buttons ---------------- */
 .glass-select {
-  height: 34px;                  /* slightly smaller */
+  height: 34px;                  /* unified control height */
   min-width: 132px;
   padding: 0 14px;
   border-radius: var(--r-pill);
@@ -198,7 +199,7 @@ body {
 }
 
 .rt-button {
-  height: 34px;                  /* smaller */
+  height: 34px;                  /* unified control height */
   padding: 0 13px;
   display: inline-flex;
   align-items: center;
@@ -244,10 +245,22 @@ body {
 
 /* Toggle (ThemeSwitch container can apply .rt-toggle) */
 .rt-toggle {
+  height: 34px;                  /* unified control height */
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   color: var(--text);
   background: var(--glass);
   border: 1px solid var(--edge-strong);
+  border-radius: var(--r-pill);
   box-shadow: 0 6px 16px rgba(0,0,0,.08);
+  user-select: none;
+}
+.rt-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59,130,246,.28);
 }
 
 /* Connect animations */
@@ -295,6 +308,14 @@ body {
 }
 .rt-drawer.open { transform: translateY(0); opacity: 1; pointer-events: auto; }
 
+.rt-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.25);
+  z-index: 24;
+}
+
+/* Drawer panel */
 .rt-drawer-inner {
   width: min(96%, 640px);
   margin: 8px auto 0;
@@ -306,21 +327,39 @@ body {
   box-shadow: var(--shadow-s);
   padding: 12px;
   color: var(--text);
+
+  /* New: layout balance & consistent gaps inside the drawer */
+  display: grid;
+  gap: 12px;
 }
 
+/* Drawer rows: 2-up on wide, 1-up on mobile */
 .rt-drawer-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-bottom: 10px;
 }
 
-.rt-drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.25);
-  z-index: 24;
+/* NEW: Make controls fill columns for perfect alignment */
+.rt-drawer-row .glass-select,
+.rt-drawer-row .rt-button,
+.rt-drawer-row .rt-toggle {
+  width: 100%;
 }
+
+/* NEW: Ensure equal heights & vertical centering for any control inside drawer */
+.rt-drawer-row > * {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+}
+
+/* NEW: Tighten internal padding so large labels don’t overgrow */
+.rt-drawer-row .rt-button { justify-content: center; }
+.rt-drawer-row .rt-toggle { justify-content: space-between; }
+
+/* NEW: In-drawer select sizing to avoid cramped feel */
+.rt-drawer .glass-select { min-width: 0; }
 
 /* ---------------- Visualizer ---------------- */
 .rt-wavebar { display: grid; place-items: center; }
@@ -530,7 +569,7 @@ body {
   .rt-actions-inline { display: none; }
   .rt-hamburger { display: inline-block; }
 
-  .rt-drawer-row { grid-template-columns: 1fr; }
+  .rt-drawer-row { grid-template-columns: 1fr; } /* stack */
   .rt-details-row { grid-template-columns: 1fr; }
 
   /* slightly larger main button on phones for accessibility */
@@ -538,12 +577,22 @@ body {
     width: clamp(50px, 14vw, 64px);
     height: clamp(50px, 14vw, 64px);
   }
+
+  /* NEW: keep drawer comfy on phones */
+  .rt-drawer-inner { padding: 12px; gap: 10px; }
+  .rt-drawer-row { gap: 10px; }
 }
 
+/* Very small screens: scale controls down slightly so drawer feels airy */
 @media (max-width: 480px) {
   :root { --container-max: 92vw; }
-  .rt-button { padding: 0 12px; height: 32px; }
-  .glass-select { min-width: 120px; height: 32px; }
+  .rt-button { padding: 0 12px; height: 32px; font-size: var(--fs-13); }
+  .glass-select { min-width: 110px; height: 32px; font-size: var(--fs-13); }
+  .rt-toggle { height: 32px; padding: 0 10px; font-size: var(--fs-13); }
+
+  /* In-drawer: ensure full-width & even rhythm */
+  .rt-drawer-inner { padding: 10px; gap: 8px; }
+  .rt-drawer-row { gap: 8px; }
 }
 
 /* Motion reduction */
@@ -552,7 +601,7 @@ body {
   .rt-connect.idle, .rt-connect.connecting, .rt-connect.connected, .rt-connect.error {
     animation: none !important;
   }
-  .rt-button, .glass-select, .rt-fab, .rt-box {
+  .rt-button, .glass-select, .rt-fab, .rt-box, .rt-hamburger span {
     transition: none !important;
   }
 }
