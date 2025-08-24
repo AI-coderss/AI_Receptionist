@@ -1,0 +1,24 @@
+/* BaseOrb.css
+   Makes the canvas responsive and circular, and smaller than the outer shell
+   on mobile so the FAB never overlaps. The shell size is set in RealtimeTranslator.css.
+*/
+
+.base-orb {
+  display: block;
+  width: 88%;          /* smaller inner footprint than the shell */
+  height: auto;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  margin: 0 auto;      /* center inside shell */
+  /* background is set to transparent by BaseOrb.jsx each frame */
+}
+
+/* Tablet */
+@media (max-width: 900px){
+  .base-orb { width: 82%; }
+}
+
+/* Mobile */
+@media (max-width: 480px){
+  .base-orb { width: 74%; } /* shrink inner circumference further on small screens */
+}
