@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars */
 // src/components/RealtimeTranslator.jsx
-// Soft glass UI (transparent), fully responsive, animated top bar & Connect button,
-// mobile hamburger drawer, Push-To-Talk per party, real-time transcripts.
+// Soft glass UI, responsive, single "Listen" button (toggle), pure VAD turn-taking,
+// bilingual auto-detect → translate to the opposite language, echo/duplicate suppression.
 
 import React, { useEffect, useRef, useState } from "react";
 import AudioWave from "./AudioWave";
@@ -11,7 +11,6 @@ import ThemeSwitch from "./ThemeSwitch";
 const SIGNAL_URL = "https://ai-receptionist-webrtc-server.onrender.com/api/rtc-connect";
 
 // Public-folder logo path (place your file in /public)
-// Example names: /hospital-logo.svg, /hospital-logo.png, etc.
 const LOGO_PATH = "/logo.png";
 
 const LANG_OPTS = [
@@ -38,15 +37,23 @@ const LANG_OPTS = [
   { code: "cs", label: "Czech" },
   { code: "sk", label: "Slovak" },
   { code: "hu", label: "Hungarian" },
-  { code: "ro", label: "Romanian" },  
+  { code: "ro", label: "Romanian" },
   { code: "bg", label: "Bulgarian" },
   { code: "el", label: "Greek" },
 ];
 const labelOf = (c) => LANG_OPTS.find((x) => x.code === c)?.label || c;
 
+// normalize a line to suppress near-duplicates
+const norm = (s) =>
+  (s || "")
+    .replace(/\s+/g, " ")
+    .replace(/[.?!،۔]+$/u, "")
+    .trim()
+    .toLowerCase();
+
 export default function RealtimeTranslator() {
   const [status, setStatus] = useState("idle"); // idle | connecting | connected | error
-  const [menuOpen, setMenuOpen] = useState(false); // mobile drawer
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Theme
   const [theme, setTheme] = useState(() =>
@@ -60,13 +67,12 @@ export default function RealtimeTranslator() {
   }, [theme]);
   const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
 
-  // Languages
-  const [patientLang, setPatientLang] = useState("de");
-  const [receptionistLang, setReceptionistLang] = useState("ar");
+  // Languages (two dropdowns)
+  const [patientLang, setPatientLang] = useState("ar");
+  const [receptionistLang, setReceptionistLang] = useState("en");
 
-  // PTT
-  const [pttRole, setPttRole] = useState(null); // 'patient' | 'receptionist' | null
-  const pendingRoleRef = useRef(null);
+  // Single listen toggle (no push-to-talk)
+  const [listening, setListening] = useState(false);
 
   // WebRTC
   const pcRef = useRef(null);
@@ -93,6 +99,10 @@ export default function RealtimeTranslator() {
   const [patientAge, setPatientAge] = useState("");
   const [fileNumber, setFileNumber] = useState("");
 
+  // Duplicate/echo suppression (avoid repeating same line)
+  const recentMapRef = useRef(new Map()); // normLine -> timestamp(ms)
+  const RECENT_WINDOW_MS = 7000;
+
   const mergeDetailsFromSummary = (obj) => {
     if (!obj || typeof obj !== "object") return;
     if (obj.name && !patientName) setPatientName(obj.name);
@@ -107,41 +117,47 @@ export default function RealtimeTranslator() {
     el.scrollTop = el.scrollHeight;
   }, [englishTranscript, liveUserLine, liveAssistLine]);
 
-  // Instructions
+  // Instructions builder: auto-detect speaker language, translate to the OTHER one
   function buildInstructions(recLang, patLang) {
     const recL = labelOf(recLang),
       patL = labelOf(patLang);
     return `
 ROLE: Real-time two-party hospital interpreter.
 
-PARTIES:
-- Receptionist: speaks ${recL} (${recLang})
-- Patient: speaks ${patL} (${patLang})
+LANGUAGES:
+- Language A: ${recL} (${recLang})
+- Language B: ${patL} (${patLang})
 
 OBJECTIVE:
-- Mediate turn-by-turn without overlap.
-- Translate ONLY what was spoken; no added meaning or advice.
-- Be concise, polite, and neutral.
+- For each human utterance, DETECT which of the two languages it is in.
+- Then translate ONLY into the OPPOSITE language:
+  • If the utterance is in ${recL} → output [[TO_PATIENT]] <${patL} translation>
+  • If the utterance is in ${patL} → output [[TO_RECEPTIONIST]] <${recL} translation>
 
-ANTI-HALLUCINATION:
-- Do not speak until detecting a completed utterance via VAD.
-- Never start on your own.
-
-TURN LOGIC:
-- If CURRENT_SPEAKER is Patient → [[TO_RECEPTIONIST]] <${recL}>
-- If CURRENT_SPEAKER is Receptionist → [[TO_PATIENT]] <${patL}>
+TURNING & TIMING (VAD):
+- Wait for a complete utterance (VAD end-of-speech) BEFORE replying.
+- Never interrupt or speak during input; remain silent between turns.
 
 STRICT OUTPUT:
-- Newline-delimited frames; only [[TO_PATIENT]], [[TO_RECEPTIONIST]], [[SUMMARY]] tags.
+- Newline-delimited frames.
+- Allowed tags: [[TO_PATIENT]], [[TO_RECEPTIONIST]], [[SUMMARY]]
+- Exactly ONE tagged translation per turn. No combined tags.
+- Keep translations concise, faithful, and neutral. No added advice or content.
+
+ECHO-LOOP AVOIDANCE:
+- Do NOT re-translate your own synthetic speech or previous output.
+- If the input matches your prior output (same content, opposite direction), ignore it.
+
+OPTIONAL SUMMARY (only if explicitly stated by speakers):
+- [[SUMMARY]] {"reason_for_visit":"...","department":"...","urgency":"...","file_number":"...","name":"...","age":0,"notes":"..."} — include only fields explicitly mentioned.
+
+NO HALLUCINATIONS:
+- Do not invent names, IDs, symptoms, or facts not spoken.
+- If unclear, output nothing and wait for the next turn.
 `.trim();
   }
-  const speakerHint = (role) =>
-    role === "patient"
-      ? `\nCURRENT_SPEAKER: Patient\n- Translate to the Receptionist.\n`
-      : role === "receptionist"
-      ? `\nCURRENT_SPEAKER: Receptionist\n- Translate to the Patient.\n`
-      : `\nCURRENT_SPEAKER: None\n- Remain silent until a PTT is active.\n`;
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       try {
@@ -153,10 +169,15 @@ STRICT OUTPUT:
       dcRef.current = null;
       localStreamRef.current = null;
       setStatus("idle");
-      setPttRole(null);
       setRemoteStream(null);
     };
   }, []);
+
+  function setTrackEnabled(on) {
+    (localStreamRef.current?.getAudioTracks?.() || []).forEach(
+      (t) => (t.enabled = !!on)
+    );
+  }
 
   async function ensureLocalStream() {
     if (localStreamRef.current) return localStreamRef.current;
@@ -167,8 +188,8 @@ STRICT OUTPUT:
         autoGainControl: true,
       },
     });
-    // Start muted; unmute only during PTT
-    stream.getAudioTracks().forEach((t) => (t.enabled = false));
+    // mic follows "listening" toggle
+    stream.getAudioTracks().forEach((t) => (t.enabled = listening));
     localStreamRef.current = stream;
     return stream;
   }
@@ -204,36 +225,31 @@ STRICT OUTPUT:
         const st = pc.connectionState;
         if (st === "failed" || st === "disconnected" || st === "closed") {
           setStatus("error");
-          setPttRole(null);
-          localStreamRef.current
-            ?.getAudioTracks()
-            .forEach((t) => (t.enabled = false));
+          setTrackEnabled(false);
+          setListening(false);
         }
       };
       pc.oniceconnectionstatechange = () => {
         if (pc.iceConnectionState === "failed") {
           pc.close();
           setStatus("error");
-          setPttRole(null);
-          localStreamRef.current
-            ?.getAudioTracks()
-            .forEach((t) => (t.enabled = false));
+          setTrackEnabled(false);
+          setListening(false);
         }
       };
 
       const dc = pc.createDataChannel("response", { ordered: true });
       dcRef.current = dc;
 
+      // Live user transcripts keyed by item_id
+      const liveByItem = new Map();
       let assistBuffer = "";
-      const liveByItem = new Map(); // item_id -> partial user transcript
 
       dc.onopen = () => {
         setStatus("connected");
 
-        const initialRole = pendingRoleRef.current ?? null;
-        const instructions =
-          buildInstructions(receptionistLang, patientLang) +
-          speakerHint(initialRole);
+        // Initial session config (pure VAD; no language pinned → let STT auto-detect)
+        const instructions = buildInstructions(receptionistLang, patientLang);
 
         dc.send(
           JSON.stringify({
@@ -243,28 +259,33 @@ STRICT OUTPUT:
               instructions,
               turn_detection: {
                 type: "server_vad",
-                threshold: 0.7,
-                prefix_padding_ms: 250,
-                silence_duration_ms: 700,
+                threshold: 0.77,          // slightly stricter to avoid rushing
+                prefix_padding_ms: 300,
+                silence_duration_ms: 1000, // wait a bit longer before responding
               },
               input_audio_transcription: {
                 model: "gpt-4o-mini-transcribe",
-                language:
-                  initialRole === "patient" ? patientLang : receptionistLang,
+                // omit 'language' to allow bilingual auto-detection
               },
             },
           })
         );
-
-        if (initialRole) beginPTT(initialRole);
-        pendingRoleRef.current = null;
       };
 
       dc.onmessage = (evt) => {
+        // prune old duplicates window periodically
+        const now = Date.now();
+        const map = recentMapRef.current;
+        for (const [k, ts] of map.entries()) {
+          if (now - ts > RECENT_WINDOW_MS) map.delete(k);
+        }
+
+        // Handle events
         try {
           const msg = JSON.parse(evt.data);
           const t = msg?.type;
 
+          // --- Live user transcription (partial) ---
           if (
             t === "conversation.item.input_audio_transcription.delta" &&
             typeof msg.delta === "string"
@@ -275,6 +296,8 @@ STRICT OUTPUT:
             setLiveUserLine(cur);
             return;
           }
+
+          // --- User transcription completed ---
           if (
             t === "conversation.item.input_audio_transcription.completed" &&
             typeof msg.transcript === "string"
@@ -290,6 +313,7 @@ STRICT OUTPUT:
             return;
           }
 
+          // --- Assistant text stream ---
           if (t === "response.text.delta" && typeof msg.delta === "string") {
             assistBuffer += msg.delta;
 
@@ -300,22 +324,39 @@ STRICT OUTPUT:
 
               if (!line) continue;
 
+              // Duplicate/echo suppression
+              const nline = norm(line);
+              if (nline && recentMapRef.current.has(nline)) {
+                // Ignore duplicates seen very recently
+                continue;
+              }
+
               if (line.startsWith("[[TO_PATIENT]]")) {
                 const content = line.slice("[[TO_PATIENT]]".length).trim();
+                const nc = norm(content);
+                if (nc) recentMapRef.current.set(nc, Date.now());
                 if (content)
                   setToPatientText((prev) =>
                     prev ? prev + "\n" + content : content
                   );
+                setLiveAssistLine("");
                 continue;
               }
+
               if (line.startsWith("[[TO_RECEPTIONIST]]")) {
-                const content = line.slice("[[TO_RECEPTIONIST]]".length).trim();
+                const content = line
+                  .slice("[[TO_RECEPTIONIST]]".length)
+                  .trim();
+                const nc = norm(content);
+                if (nc) recentMapRef.current.set(nc, Date.now());
                 if (content)
                   setToReceptionistText((prev) =>
                     prev ? prev + "\n" + content : content
                   );
+                setLiveAssistLine("");
                 continue;
               }
+
               if (line.startsWith("[[SUMMARY]]")) {
                 const jsonPart = line.slice("[[SUMMARY]]".length).trim();
                 try {
@@ -329,16 +370,25 @@ STRICT OUTPUT:
                   setSummaryText(parts.join(" • "));
                   mergeDetailsFromSummary(obj);
                 } catch {}
+                setLiveAssistLine("");
                 continue;
               }
 
-              setEnglishTranscript((prev) =>
-                prev ? prev + "\n" + line : line
-              );
+              // Un-tagged log line
+              const nlog = norm(line);
+              if (nlog) recentMapRef.current.set(nlog, Date.now());
+              setEnglishTranscript((prev) => (prev ? prev + "\n" + line : line));
               setLiveAssistLine("");
             }
 
+            // show partials while waiting for newline
             setLiveAssistLine(assistBuffer.trim());
+            return;
+          }
+
+          // --- A response was fully completed ---
+          if (t === "response.completed") {
+            setLiveAssistLine("");
             return;
           }
         } catch {
@@ -348,15 +398,17 @@ STRICT OUTPUT:
 
       dc.onclose = () => {
         setStatus("idle");
-        setPttRole(null);
         setLiveUserLine("");
         setLiveAssistLine("");
+        setListening(false);
+        setTrackEnabled(false);
       };
       dc.onerror = () => {
         setStatus("error");
-        setPttRole(null);
         setLiveUserLine("");
         setLiveAssistLine("");
+        setListening(false);
+        setTrackEnabled(false);
       };
 
       const offer = await pc.createOffer({
@@ -381,78 +433,52 @@ STRICT OUTPUT:
     } catch (err) {
       console.error("RTC setup failed", err);
       setStatus("error");
-      setPttRole(null);
-      localStreamRef.current
-        ?.getAudioTracks()
-        .forEach((t) => (t.enabled = false));
+      setListening(false);
+      setTrackEnabled(false);
     }
   }
 
-  // ---- PTT helpers ----
-  function setTrackEnabled(on) {
-    (localStreamRef.current?.getAudioTracks?.() || []).forEach(
-      (t) => (t.enabled = !!on)
-    );
-  }
-  function sendSpeakerHint(role) {
-    if (!dcRef.current || dcRef.current.readyState !== "open") return;
-    const instr =
-      buildInstructions(receptionistLang, patientLang) + speakerHint(role);
-    const lang =
-      role === "patient"
-        ? patientLang
-        : role === "receptionist"
-        ? receptionistLang
-        : receptionistLang;
-
-    dcRef.current.send(
-      JSON.stringify({
-        type: "session.update",
-        session: {
-          instructions: instr,
-          turn_detection: {
-            type: "server_vad",
-            threshold: 0.7,
-            prefix_padding_ms: 250,
-            silence_duration_ms: 700,
-          },
-          input_audio_transcription: {
-            model: "gpt-4o-mini-transcribe",
-            language: lang,
-          },
-        },
-      })
-    );
-  }
-  function beginPTT(role) {
-    setPttRole(role);
-    sendSpeakerHint(role);
-    setTrackEnabled(true);
-  }
-  function endPTT(role) {
-    if (pttRole !== role) return;
-    setPttRole(null);
-    setTrackEnabled(false);
-    sendSpeakerHint(null);
-  }
-
-  async function handlePTTDown(role) {
+  // Listen toggle
+  async function toggleListening() {
     if (status !== "connected") {
-      pendingRoleRef.current = role;
       await startSession();
-      setMenuOpen(false);
+      // after connected, flip to listening on next tick
+      setTimeout(() => {
+        setListening(true);
+        setTrackEnabled(true);
+      }, 0);
       return;
     }
-    beginPTT(role);
-  }
-  function handlePTTUp(role) {
-    endPTT(role);
+    setListening((prev) => {
+      const next = !prev;
+      setTrackEnabled(next);
+      return next;
+    });
   }
 
-  // Sync instructions when languages change mid-call
+  // Sync instructions if languages change mid-call
   useEffect(() => {
-    if (status === "connected" && dcRef.current?.readyState === "open")
-      sendSpeakerHint(pttRole);
+    if (status === "connected" && dcRef.current?.readyState === "open") {
+      const instructions = buildInstructions(receptionistLang, patientLang);
+      dcRef.current.send(
+        JSON.stringify({
+          type: "session.update",
+          session: {
+            instructions,
+            turn_detection: {
+              type: "server_vad",
+              threshold: 0.77,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 1000,
+            },
+            input_audio_transcription: {
+              model: "gpt-4o-mini-transcribe",
+              // keep language unspecified for auto-detect
+            },
+          },
+        })
+      );
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientLang, receptionistLang]);
 
@@ -468,7 +494,7 @@ STRICT OUTPUT:
       {/* Top Bar */}
       <div className="rt-topbar">
         <div className="rt-topbar-inner">
-          {/* Brand with public-folder logo */}
+          {/* Brand */}
           <div className="rt-brand">
             <img
               className="rt-logo"
@@ -544,7 +570,6 @@ STRICT OUTPUT:
                 </span>
               </button>
 
-              {/* Reusable Theme Switch (controlled) */}
               <ThemeSwitch
                 checked={theme === "dark"}
                 onChange={toggleTheme}
@@ -553,7 +578,7 @@ STRICT OUTPUT:
               />
             </div>
 
-            {/* Hamburger (visible on mobile) */}
+            {/* Hamburger (mobile) */}
             <button
               className={`rt-hamburger ${menuOpen ? "open" : ""}`}
               aria-label="Menu"
@@ -567,7 +592,7 @@ STRICT OUTPUT:
           </div>
         </div>
 
-        {/* Mobile drawer – mirrors all settings */}
+        {/* Mobile drawer */}
         <div className={`rt-drawer ${menuOpen ? "open" : ""}`}>
           <div className="rt-drawer-inner">
             <div className="rt-drawer-row">
@@ -640,7 +665,7 @@ STRICT OUTPUT:
         )}
       </div>
 
-      {/* Audio Wave */}
+      {/* Audio Wave (assistant output) */}
       <div className="rt-wavebar">
         <div className="rt-wavebar-inner">
           <div className="voice-stage-wave">
@@ -732,56 +757,22 @@ STRICT OUTPUT:
         </div>
       </main>
 
-      {/* PTT Controls */}
+      {/* Single Listen FAB */}
       <div className="rt-ptt-wrap">
         <div className="rt-ptt-grid">
-          {/* PATIENT */}
           <button
-            className={`rt-fab rt-fab--patient ${
-              pttRole === "patient" ? "on" : "off"
+            className={`rt-fab rt-fab--main ${
+              listening ? "on" : "off"
             } ${status}`}
-            title="Hold to speak (Patient)"
-            onMouseDown={() => handlePTTDown("patient")}
-            onMouseUp={() => handlePTTUp("patient")}
-            onMouseLeave={() => handlePTTUp("patient")}
-            onTouchStart={(e) => {
-              e.preventDefault();
-              handlePTTDown("patient");
-            }}
-            onTouchEnd={() => handlePTTUp("patient")}
+            title={listening ? "Listening (VAD on)" : "Click to start listening"}
+            onClick={toggleListening}
             disabled={status === "connecting" || status === "error"}
-            aria-pressed={pttRole === "patient"}
+            aria-pressed={listening}
           >
-            <svg viewBox="0 0 24 24" role="img" aria-label="Patient mic">
+            <svg viewBox="0 0 24 24" role="img" aria-label="Mic">
               <path
                 className="mic-shape"
                 d="M12 14a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2Z"
-              />
-            </svg>
-            <span className="rt-fab-ring" aria-hidden />
-          </button>
-
-          {/* RECEPTIONIST */}
-          <button
-            className={`rt-fab rt-fab--receptionist ${
-              pttRole === "receptionist" ? "on" : "off"
-            } ${status}`}
-            title="Hold to speak (Receptionist)"
-            onMouseDown={() => handlePTTDown("receptionist")}
-            onMouseUp={() => handlePTTUp("receptionist")}
-            onMouseLeave={() => handlePTTUp("receptionist")}
-            onTouchStart={(e) => {
-              e.preventDefault();
-              handlePTTDown("receptionist");
-            }}
-            onTouchEnd={() => handlePTTUp("receptionist")}
-            disabled={status === "connecting" || status === "error"}
-            aria-pressed={pttRole === "receptionist"}
-          >
-            <svg viewBox="0 0 24 24" role="img" aria-label="Receptionist mic">
-              <path
-                className="mic-shape"
-                d="M8 9a4 4 0 1 1 8 0v2a4 4 0 1 1-8 0V9Z"
               />
             </svg>
             <span className="rt-fab-ring" aria-hidden />
@@ -790,13 +781,7 @@ STRICT OUTPUT:
 
         <div className={`rt-fab-status ${status}`}>
           {status === "connecting" ? "Connecting…" : status}
-          {pttRole
-            ? ` • ${
-                pttRole === "patient"
-                  ? "Patient speaking"
-                  : "Receptionist speaking"
-              }`
-            : ""}
+          {status === "connected" ? (listening ? " • listening" : " • paused") : ""}
         </div>
       </div>
     </div>
