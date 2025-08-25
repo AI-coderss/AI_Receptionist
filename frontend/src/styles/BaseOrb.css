@@ -1,20 +1,21 @@
 /* BaseOrb.css
-   Inner canvas footprint smaller than shell; extra shrink on mobile so FAB never overlaps.
+   Keep the canvas small; particles fill inside (from JS).
+   This is the canvas element inside the baseboard.
 */
 
-.base-orb {
-  display: block;
-  width: 88%;          /* smaller inner footprint */
-  height: auto;
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
-  margin: 0 auto;      /* centered in shell */
+.base-orb{
+  display:block;
+  width: 88%;      /* small footprint; keeps cards near the fold */
+  height:auto;
+  aspect-ratio:1 / 1;
+  border-radius:50%;
+  margin:0 auto;
 }
 
-@media (max-width: 900px){
-  .base-orb { width: 82%; }
+@media (max-width:900px){
+  .base-orb{ width: 84%; }
 }
 
-@media (max-width: 480px){
-  .base-orb { width: 74%; }
+@media (max-width:480px){
+  .base-orb{ width: 80%; }
 }

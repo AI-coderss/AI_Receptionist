@@ -1,19 +1,15 @@
 /* eslint-disable react-hooks/exhaustive-deps */
 // src/components/BaseOrb.jsx
-// Theme-aware, fully responsive canvas:
-// - Dark theme: cyan particles on transparent canvas (shell shows cyan tint).
-// - Light theme: blue particles on a TRANSPARENT canvas (no black).
-// - Resizes to container; canvas footprint can be smaller than shell via CSS.
-// - Particle radius scales with audio.
-
-// src/components/BaseOrb.jsx
-// Transparent canvas in BOTH themes; cyan particles in dark, blue in light.
-// Responsive to container; inner footprint shrinks on mobile via CSS.
+// Canvas stays small; particle sphere fills ~98–99% of that canvas
+// Transparent background in both themes
 
 import React, { useEffect, useRef, useState } from "react";
 import "../styles/BaseOrb.css";
 import useAudioForVisualizerStore from "../store/useAudioForVisualizerStore";
 import { enhanceAudioScale } from "./audioLevelAnalyzer";
+
+// Make sphere radius ~ 49.5% of the shorter side → diameter ≈ 99% of canvas
+const FILL_FACTOR = 0.896;
 
 const BaseOrb = () => {
   const canvasRef = useRef(null);
@@ -58,13 +54,13 @@ const BaseOrb = () => {
     const ro = new ResizeObserver(fit);
     ro.observe(canvas);
 
-    let sphereRad = 240;
+    let sphereRad = 180;
     let radius_sp = Math.max(0.7, audioScale);
 
     const fLen = 320;
     const particleAlpha = 1;
-    const colorLight = "rgba(0,123,255,";   // blue
-    const colorDark = "rgba(34,211,238,";   // cyan
+    const colorLight = "rgba(0,123,255,";  // blue
+    const colorDark  = "rgba(34,211,238,"; // cyan
     const randAccelX = 0.1, randAccelY = 0.1, randAccelZ = 0.1;
     const gravity = 0;
     const particleRad = 2.5;
@@ -125,9 +121,12 @@ const BaseOrb = () => {
 
       const projCenterX = canvas.width / 2;
       const projCenterY = canvas.height / 2;
-      sphereRad = Math.max(120, Math.min(canvas.width, canvas.height) * 0.34);
-      const zMax = fLen - 2;
+      const shortSide = Math.min(canvas.width, canvas.height);
 
+      // SMALL canvas, BIG sphere inside
+      sphereRad = Math.max(80, shortSide * FILL_FACTOR);
+
+      const zMax = fLen - 2;
       const raw = useAudioForVisualizerStore.getState().audioScale;
       radius_sp = Math.max(0.7, enhanceAudioScale(raw));
 
@@ -150,7 +149,7 @@ const BaseOrb = () => {
       const sinAngle = Math.sin(turnAngle);
       const cosAngle = Math.cos(turnAngle);
 
-      // Transparent canvas always
+      // Transparent canvas
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       canvas.style.backgroundColor = "transparent";
 
@@ -160,6 +159,7 @@ const BaseOrb = () => {
       while (p) {
         const next = p.next;
         p.age++;
+
         if (p.age > p.stuckTime) {
           p.velX += randAccelX * (Math.random() * 2 - 1);
           p.velY += gravity + randAccelY * (Math.random() * 2 - 1);
@@ -170,9 +170,9 @@ const BaseOrb = () => {
         }
 
         const rotX = cosAngle * p.x + sinAngle * (p.z + sphereRad + 3);
-        const rotZ =
-          -sinAngle * p.x + cosAngle * (p.z + sphereRad + 3) - sphereRad - 3;
+        const rotZ = -sinAngle * p.x + cosAngle * (p.z + sphereRad + 3) - sphereRad - 3;
         const m = (radius_sp * fLen) / (fLen - rotZ);
+
         p.projX = rotX * m + projCenterX;
         p.projY = p.y * m + projCenterY;
 
@@ -184,7 +184,9 @@ const BaseOrb = () => {
           } else {
             p.alpha = ((p.lastValue - p.holdValue) / p.decay) * (p.age - p.attack - p.hold) + p.holdValue;
           }
-        } else p.dead = true;
+        } else {
+          p.dead = true;
+        }
 
         const outOfView =
           p.projX > canvas.width || p.projX < 0 ||
@@ -199,6 +201,7 @@ const BaseOrb = () => {
           ctx.arc(p.projX, p.projY, Math.max(0.5, m * particleRad), 0, 2 * Math.PI);
           ctx.fill();
         }
+
         p = next;
       }
     };
@@ -210,13 +213,7 @@ const BaseOrb = () => {
     };
   }, [isDark]);
 
-  return (
-    <canvas
-      className="base-orb"
-      id="base-orb"
-      ref={canvasRef}
-    />
-  );
+  return <canvas className="base-orb" id="base-orb" ref={canvasRef} />;
 };
 
 export default BaseOrb;
