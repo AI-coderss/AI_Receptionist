@@ -41,7 +41,16 @@ const LANG_OPTS = [
   { code: "ro", label: "Romanian" },
   { code: "bg", label: "Bulgarian" },
   { code: "el", label: "Greek" },
+  { code: "tl", label: "Filipino (Tagalog)" },  // Added Philippine language
+  { code: "ms", label: "Malay" },
+  { code: "id", label: "Indonesian" },
+  { code: "th", label: "Thai" },
+  { code: "fa", label: "Persian (Farsi)" },
+  { code: "he", label: "Hebrew" },
+  { code: "sw", label: "Swahili" },
+  { code: "vi", label: "Vietnamese" }
 ];
+
 const labelOf = (c) => LANG_OPTS.find((x) => x.code === c)?.label || c;
 
 // Tag helpers
